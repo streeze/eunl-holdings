@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Wichtig: Python 3.8, damit die alten Wheels (numpy 1.18.4, lxml 4.5.1) verfügbar sind
+      # Python 3.8: kompatibel mit älteren Pins (numpy 1.18.4, lxml 4.5.1)
       - name: Setup Python 3.8
         uses: actions/setup-python@v5
         with:
@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade wheel "setuptools<81"
 
-      # Systemlibs für lxml-Build (falls doch kein Wheel gezogen wird)
+      # Systemlibs, falls lxml dennoch gebaut wird
       - name: Install system packages for lxml build
         run: |
           sudo apt-get update
@@ -33,12 +33,11 @@ jobs:
       - name: Clone talsan/ishares (scraper)
         run: git clone --depth 1 https://github.com/talsan/ishares.git vendor/ishares
 
-      # Erst requirements des Repos installieren (mit alten Pins)
       - name: Install ishares requirements
         run: |
           pip install -r vendor/ishares/requirements.txt
 
-      # Zusätzliche Python-Pakete für unseren Export/Parsing-Kram
+      # Zusätzliche hilfreiche Python-Pakete
       - name: Install extra Python deps
         run: |
           pip install pandas pyarrow requests python-dateutil beautifulsoup4 html5lib
@@ -47,16 +46,24 @@ jobs:
         run: |
           pwd
           ls -la
+          ls -la vendor/ishares || true
           ls -la vendor/ishares/ishares || true
 
+      # >>> WICHTIG: PYTHONPATH setzen und Modul ausführen, damit 'config' gefunden wird
       - name: Fetch full SWDA holdings history
+        env:
+          PYTHONPATH: vendor/ishares
         run: |
-          python vendor/ishares/ishares/sync_etf_downloader.py --outputpath data/ishares SWDA --overwrite
+          python - << 'PY'
+import sys, pprint
+print("PYTHONPATH head:", sys.path[:5])
+PY
+          python -m ishares.sync_etf_downloader --outputpath data/ishares SWDA --overwrite
 
       - name: List downloaded files (debug)
         run: |
           echo "Listing data/ishares..."
-          find data/ishares -maxdepth 4 -type f | head -n 50 || true
+          find data/ishares -maxdepth 5 -type f | head -n 100 || true
           echo "Count of CSVs:"
           find data/ishares -name "asofdate=*.csv" | wc -l || true
 
