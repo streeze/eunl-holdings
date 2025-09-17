@@ -13,17 +13,18 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      # Wichtig: Python 3.8, damit die alten Wheels (numpy 1.18.4, lxml 4.5.1) verfügbar sind
+      - name: Setup Python 3.8
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.8"
 
-      - name: Install base Python deps
+      - name: Upgrade pip & base tools
         run: |
           python -m pip install --upgrade pip
-          pip install pandas pyarrow requests python-dateutil beautifulsoup4 html5lib
+          pip install --upgrade wheel "setuptools<81"
 
-      # >>> NEU: Systemlibs für lxml bauen
+      # Systemlibs für lxml-Build (falls doch kein Wheel gezogen wird)
       - name: Install system packages for lxml build
         run: |
           sudo apt-get update
@@ -32,9 +33,15 @@ jobs:
       - name: Clone talsan/ishares (scraper)
         run: git clone --depth 1 https://github.com/talsan/ishares.git vendor/ishares
 
-      - name: Install ishares requirements (pinnt lxml==4.5.1)
+      # Erst requirements des Repos installieren (mit alten Pins)
+      - name: Install ishares requirements
         run: |
           pip install -r vendor/ishares/requirements.txt
+
+      # Zusätzliche Python-Pakete für unseren Export/Parsing-Kram
+      - name: Install extra Python deps
+        run: |
+          pip install pandas pyarrow requests python-dateutil beautifulsoup4 html5lib
 
       - name: Show repo tree before download (debug)
         run: |
