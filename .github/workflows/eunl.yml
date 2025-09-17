@@ -1,8 +1,139 @@
 name: EUNL Yearly Holdings
 on:
   workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "EUNL hello"
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.8
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+
+      - name: Upgrade pip & tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade wheel "setuptools<81"
+
+      - name: Install system deps for lxml
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt1-dev zlib1g-dev
+
+      - name: Clone talsan/ishares
+        run: git clone --depth 1 https://github.com/talsan/ishares.git vendor/ishares
+
+      - name: Install ishares requirements
+        run: |
+          pip install -r vendor/ishares/requirements.txt
+
+      - name: Install extra Python deps
+        run: |
+          pip install pandas pyarrow requests python-dateutil beautifulsoup4 html5lib
+          pip install scrapingbee cloudscraper pandas_market_calendars backports.zoneinfo
+          pip install openpyxl xlrd "urllib3<2" "certifi<2021" "chardet<4" "idna<3"
+
+      # Downloader erzeugt ./ishares/output/... relativ im Klon
+      - name: Run downloader (with retries)
+        working-directory: vendor/ishares
+        env:
+          PYTHONPATH: .
+        run: |
+          set -e
+          for i in 1 2 3; do
+            echo "Attempt $i/3"
+            python -m ishares.sync_etf_downloader --overwrite SWDA && break
+            echo "Retry in 10s"; sleep 10
+          done
+
+      - name: Show downloaded tree (debug)
+        run: |
+          echo "Expect files under vendor/ishares/ishares/output/type=holdings/state=formatted/etf=SWDA/"
+          find vendor/ishares/ishares/output -maxdepth 6 -type f | head -n 200 || true
+          echo "Count of CSVs:"
+          find vendor/ishares/ishares/output -name "asofdate=*.csv" | wc -l || true
+
+      # Falls das Script nicht im Repo liegt, notfalls minimal erzeugen
+      - name: Ensure select_yearly_snapshots.py exists
+        run: |
+          mkdir -p scripts
+          if [ ! -f scripts/select_yearly_snapshots.py ]; then
+            cat > scripts/select_yearly_snapshots.py <<'PY'
+#!/usr/bin/env python3
+import argparse, sys
+from pathlib import Path
+import pandas as pd
+from dateutil.parser import isoparse
+def find_csvs(root: Path, etf: str):
+    p = root / 'type=holdings' / 'state=formatted' / f'etf={etf}'
+    return sorted(p.glob('asofdate=*.csv')) if p.exists() else []
+def parse_asofdate(path: Path):
+    try: return isoparse(path.stem.split('=')[1]).date()
+    except Exception: return None
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--root', required=True); ap.add_argument('--etf', default='SWDA')
+    ap.add_argument('--from-year', type=int, default=2010); ap.add_argument('--outdir', default='exports/eunl_yearly')
+    args = ap.parse_args()
+    root = Path(args.root); outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
+    summary_dir = Path('summary'); summary_dir.mkdir(parents=True, exist_ok=True)
+    files = find_csvs(root, args.etf)
+    if not files: print('No CSVs found. Did the downloader run successfully?', file=sys.stderr); sys.exit(1)
+    by_year = {}
+    for p in files:
+        dt = parse_asofdate(p)
+        if dt and dt.year >= args.from_year:
+            by_year.setdefault(dt.year, []).append((dt, p))
+    rows = []
+    for year, items in sorted(by_year.items()):
+        items.sort(key=lambda x: x[0]); dt, p = items[-1]
+        df = pd.read_csv(p)
+        out_name = outdir / f"EUNL_holdings_{dt.isoformat()}.csv"
+        df.to_csv(out_name, index=False)
+        rows.append({'year': year, 'asofdate': dt.isoformat(), 'export_file': str(out_name),
+                     'n_holdings': len(df), 'source_csv': str(p)})
+    pd.DataFrame(rows).sort_values('year').to_csv(summary_dir / 'EUNL_yearly_summary.csv', index=False)
+    print(f"Wrote {len(rows)} yearly files to {outdir}")
+if __name__ == '__main__': main()
+PY
+            chmod +x scripts/select_yearly_snapshots.py
+          fi
+          ls -la scripts
+
+      # WICHTIG: richtiger Root auf die vom Downloader erzeugte Struktur
+      - name: Select latest snapshot per year (>= 2010)
+        run: |
+          python scripts/select_yearly_snapshots.py \
+            --root vendor/ishares/ishares/output \
+            --etf SWDA \
+            --from-year 2010 \
+            --outdir exports/eunl_yearly
+
+      - name: Upload exports artifact (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eunl_yearly_exports
+          path: |
+            exports/eunl_yearly
+            summary
+          if-no-files-found: warn
+
+      - name: Commit results back to repo
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add scripts/select_yearly_snapshots.py exports/eunl_yearly summary/* || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Update EUNL yearly holdings exports"
+            git push
+          else
+            echo "No changes to commit"
+          fi
