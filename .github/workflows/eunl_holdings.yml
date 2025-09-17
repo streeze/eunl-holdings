@@ -18,7 +18,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.8"
-          cache: "pip"
 
       - name: Upgrade pip & core build tools
         run: |
@@ -39,7 +38,6 @@ jobs:
 
       - name: Install extra Python deps (runtime needs)
         run: |
-          # Bisher fehlende/benötigte Pakete + häufige Kompat-Fixes
           pip install \
             pandas pyarrow requests python-dateutil beautifulsoup4 html5lib \
             scrapingbee cloudscraper pandas_market_calendars \
@@ -63,7 +61,7 @@ jobs:
         working-directory: vendor/ishares
         env:
           PYTHONPATH: .
-          # Optional: falls vorhanden, als Repo-Secret anlegen und einkommentieren
+          # Optional: falls vorhanden:
           # SCRAPINGBEE_API_KEY: ${{ secrets.SCRAPINGBEE_API_KEY }}
         run: |
           set -e
