@@ -13,7 +13,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Python 3.8 ist nötig, weil das ishares-Repo alte Numpy/Lxml-Versionen pinned
       - name: Setup Python 3.8
         uses: actions/setup-python@v5
         with:
@@ -24,7 +23,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade wheel "setuptools<81"
 
-      # Systemlibs für lxml (falls kein Wheel gezogen wird)
       - name: Install system packages for lxml build
         run: |
           sudo apt-get update
@@ -37,11 +35,11 @@ jobs:
         run: |
           pip install -r vendor/ishares/requirements.txt
 
-      # Zusätzliche benötigte Pakete
+      # Zusätzliche Pakete, inkl. pandas_market_calendars
       - name: Install extra Python deps
         run: |
           pip install pandas pyarrow requests python-dateutil beautifulsoup4 html5lib
-          pip install scrapingbee cloudscraper
+          pip install scrapingbee cloudscraper pandas_market_calendars
 
       - name: Show repo tree before download (debug)
         run: |
@@ -50,12 +48,11 @@ jobs:
           ls -la vendor/ishares || true
           ls -la vendor/ishares/ishares || true
 
-      # >>> Downloader im richtigen Verzeichnis starten, damit relative Pfade stimmen
       - name: Fetch full SWDA holdings history
         working-directory: vendor/ishares
         env:
           PYTHONPATH: .
-          # Optional: falls vorhanden, kannst du einen ScrapingBee-Key setzen:
+          # Optional: falls du einen ScrapingBee-Key hast, kannst du den als Secret setzen
           # SCRAPINGBEE_API_KEY: ${{ secrets.SCRAPINGBEE_API_KEY }}
         run: |
           python -m ishares.sync_etf_downloader --outputpath ../../data/ishares SWDA --overwrite
