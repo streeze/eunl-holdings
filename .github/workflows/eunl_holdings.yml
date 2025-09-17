@@ -9,21 +9,23 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.8
+      - name: Setup Python 3.8 (legacy wheels)
         uses: actions/setup-python@v5
         with:
           python-version: "3.8"
+          cache: "pip"
 
-      - name: Upgrade pip & base tools
+      - name: Upgrade pip & core build tools
         run: |
           python -m pip install --upgrade pip
           pip install --upgrade wheel "setuptools<81"
 
-      - name: Install system packages for lxml build
+      - name: Install system deps (lxml)
         run: |
           sudo apt-get update
           sudo apt-get install -y libxml2-dev libxslt1-dev zlib1g-dev
@@ -31,38 +33,58 @@ jobs:
       - name: Clone talsan/ishares (scraper)
         run: git clone --depth 1 https://github.com/talsan/ishares.git vendor/ishares
 
-      - name: Install ishares requirements
+      - name: Install ishares requirements (pinned, legacy)
         run: |
           pip install -r vendor/ishares/requirements.txt
 
-      # Zusätzliche Pakete, inkl. pandas_market_calendars
-      - name: Install extra Python deps
+      - name: Install extra Python deps (runtime needs)
         run: |
-          pip install pandas pyarrow requests python-dateutil beautifulsoup4 html5lib
-          pip install scrapingbee cloudscraper pandas_market_calendars
+          # Bisher fehlende/benötigte Pakete + häufige Kompat-Fixes
+          pip install \
+            pandas pyarrow requests python-dateutil beautifulsoup4 html5lib \
+            scrapingbee cloudscraper pandas_market_calendars \
+            backports.zoneinfo \
+            openpyxl xlrd \
+            "urllib3<2" "certifi<2021" "chardet<4" "idna<3"
 
-      - name: Show repo tree before download (debug)
+      - name: Show environment (debug)
         run: |
-          pwd
-          ls -la
+          python -V
+          pip --version
+          pip list | sort | tee pip-freeze.txt
+          echo "Workspace:"
+          pwd && ls -la
+          echo "ishares tree:"
           ls -la vendor/ishares || true
           ls -la vendor/ishares/ishares || true
 
-      - name: Fetch full SWDA holdings history
+      - name: Run downloader with retries
+        id: download
         working-directory: vendor/ishares
         env:
           PYTHONPATH: .
-          # Optional: falls du einen ScrapingBee-Key hast, kannst du den als Secret setzen
+          # Optional: falls vorhanden, als Repo-Secret anlegen und einkommentieren
           # SCRAPINGBEE_API_KEY: ${{ secrets.SCRAPINGBEE_API_KEY }}
         run: |
-          python -m ishares.sync_etf_downloader --outputpath ../../data/ishares SWDA --overwrite
+          set -e
+          tries=3
+          for i in $(seq 1 $tries); do
+            echo "Attempt $i/$tries"
+            python -m ishares.sync_etf_downloader --outputpath ../../data/ishares SWDA --overwrite && break
+            echo "Downloader failed (attempt $i). Sleeping 10s..."
+            sleep 10
+          done
 
       - name: List downloaded files (debug)
         run: |
           echo "Listing data/ishares..."
-          find data/ishares -maxdepth 5 -type f | head -n 100 || true
+          find data/ishares -maxdepth 6 -type f | head -n 200 || true
           echo "Count of CSVs:"
           find data/ishares -name "asofdate=*.csv" | wc -l || true
+
+      - name: Ensure script exists
+        run: |
+          test -f scripts/select_yearly_snapshots.py || (echo "scripts/select_yearly_snapshots.py fehlt!" && exit 1)
 
       - name: Select latest snapshot per year (>= 2010)
         run: |
@@ -74,16 +96,20 @@ jobs:
 
       - name: List exports (debug)
         run: |
-          echo "Summary file:"
+          echo "Summary dir:"
           ls -la summary || true
-          echo "Exports:"
+          echo "Exports dir:"
           ls -la exports/eunl_yearly || true
 
-      - name: Upload artifact
+      - name: Upload exports artifact (always try)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eunl_yearly_exports
-          path: exports/eunl_yearly
+          path: |
+            exports/eunl_yearly
+            summary
+            pip-freeze.txt
           if-no-files-found: warn
 
       - name: Commit & push results back to repo
