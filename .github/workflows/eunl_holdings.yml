@@ -70,4 +70,28 @@ jobs:
             --from-year 2010 \
             --outdir exports/eunl_yearly
 
-      - nam
+      - name: List exports (debug)
+        run: |
+          echo "Summary file:"
+          ls -la summary || true
+          echo "Exports:"
+          ls -la exports/eunl_yearly || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eunl_yearly_exports
+          path: exports/eunl_yearly
+          if-no-files-found: warn
+
+      - name: Commit & push results back to repo
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add exports/eunl_yearly summary/* || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Update EUNL yearly holdings exports"
+            git push
+          else
+            echo "No changes to commit"
+          fi
