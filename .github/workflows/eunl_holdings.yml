@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Python 3.8 ist nötig, weil das ishares-Repo alte Numpy/Lxml-Versionen verlangt
+      # Python 3.8 für alte numpy/lxml Pins des ishares-Repos
       - name: Setup Python 3.8
         uses: actions/setup-python@v5
         with:
@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade wheel "setuptools<81"
 
-      # Systembibliotheken für lxml-Build
+      # Systemlibs für lxml (falls kein Wheel)
       - name: Install system packages for lxml build
         run: |
           sudo apt-get update
@@ -53,10 +53,6 @@ jobs:
         env:
           PYTHONPATH: vendor/ishares
         run: |
-          python - << 'PY'
-import sys
-print("PYTHONPATH head:", sys.path[:5])
-PY
           python -m ishares.sync_etf_downloader --outputpath data/ishares SWDA --overwrite
 
       - name: List downloaded files (debug)
@@ -74,28 +70,4 @@ PY
             --from-year 2010 \
             --outdir exports/eunl_yearly
 
-      - name: List exports (debug)
-        run: |
-          echo "Summary file:"
-          ls -la summary || true
-          echo "Exports:"
-          ls -la exports/eunl_yearly || true
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: eunl_yearly_exports
-          path: exports/eunl_yearly
-          if-no-files-found: warn
-
-      - name: Commit & push results back to repo
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git add exports/eunl_yearly summary/* || true
-          if ! git diff --cached --quiet; then
-            git commit -m "Update EUNL yearly holdings exports"
-            git push
-          else
-            echo "No changes to commit"
-          fi
+      - nam
