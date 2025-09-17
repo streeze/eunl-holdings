@@ -18,25 +18,57 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install base Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install pandas pyarrow requests python-dateutil
+          pip install pandas pyarrow requests python-dateutil lxml beautifulsoup4 html5lib
 
       - name: Clone talsan/ishares (scraper)
         run: git clone --depth 1 https://github.com/talsan/ishares.git vendor/ishares
 
+      - name: Install ishares requirements (if present)
+        run: |
+          if [ -f vendor/ishares/requirements.txt ]; then
+            pip install -r vendor/ishares/requirements.txt
+          else
+            # Fallback: oft benötigt
+            pip install numpy pytz
+          fi
+
+      - name: Show repo tree before download (debug)
+        run: |
+          pwd
+          ls -la
+          ls -la vendor/ishares/ishares || true
+
       - name: Fetch full SWDA holdings history
-        run: python vendor/ishares/ishares/sync_etf_downloader.py --outputpath data/ishares SWDA --overwrite
+        run: |
+          python vendor/ishares/ishares/sync_etf_downloader.py --outputpath data/ishares SWDA --overwrite
+
+      - name: List downloaded files (debug)
+        run: |
+          echo "Listing data/ishares..."
+          find data/ishares -maxdepth 4 -type f | head -n 50 || true
+          echo "Count of CSVs:"
+          find data/ishares -name "asofdate=*.csv" | wc -l || true
 
       - name: Select latest snapshot per year (>= 2010)
-        run: python scripts/select_yearly_snapshots.py --root data/ishares --etf SWDA --from-year 2010 --outdir exports/eunl_yearly
+        run: |
+          python scripts/select_yearly_snapshots.py --root data/ishares --etf SWDA --from-year 2010 --outdir exports/eunl_yearly
+
+      - name: List exports (debug)
+        run: |
+          echo "Summary file:"
+          ls -la summary || true
+          echo "Exports:"
+          ls -la exports/eunl_yearly || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: eunl_yearly_exports
           path: exports/eunl_yearly
+          if-no-files-found: warn
 
       - name: Commit & push results back to repo
         run: |
@@ -49,3 +81,4 @@ jobs:
           else
             echo "No changes to commit"
           fi
+
